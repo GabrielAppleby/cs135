@@ -1,0 +1,6 @@
+Gabriel Raia Appleby
+
+It turns out the homework server doesn't have tensorflow. I will talk to the professor before you have to grade this.
+
+In order to run the classifier simply open up the my_logistic_reg.py in your favorite editor and uncomment the experiment you wish to rerun. (It will be very self explanatory once you see main()). 
+
