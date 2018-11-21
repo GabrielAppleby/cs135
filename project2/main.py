@@ -12,6 +12,8 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import cross_val_score
 from sklearn.model_selection import GridSearchCV
 from sklearn.neighbors import KNeighborsClassifier
+from sklearn.pipeline import make_pipeline
+from sklearn.pipeline import Pipeline
 from sklearn.svm import SVC
 from text_preprocessor import TextPreprocessor
 from typing import Tuple, Dict, List
@@ -24,12 +26,13 @@ MEAN_TEST_SCORE: str = 'mean_test_score'
 MEAN_TRAIN_SCORE: str = 'mean_train_score'
 STD_TEST_SCORE: str = 'std_test_score'
 PARAMS: str = 'params'
-BAG_OF_WORDS: str = ' BOW'
+BAG_OF_WORDS: str = ' tfidf'
 GLOVE: str = ' glove'
 
 GLOVE_FILE: str = 'resources/glove.6B.50d.txt'
 GLOVE_DIMENSION: int = 50
 TRAIN_FILE: str = 'resources/trainreviews.txt'
+TEST_FILE: str = 'resources/testreviewsunlabeled.txt'
 TRAIN_SEPARATOR: str = '\t'
 TRAIN_COLUMNS: List = ['Text', 'Sentiment']
 
@@ -38,8 +41,6 @@ TRANSFORM_PARAMS: Dict = {'tfidftransformer__use_idf': [True, False]}
 KNN_PARAMS: Dict = {NEIGHBORS: [1, 5, 10, 15, 20, 25, 30, 35, 40, 100],
                     'weights': ['uniform'],
                     'p': [2]}
-
-#[10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
 
 KNN_GRAPH_LABELS: Dict = {TITLE: 'K Nearest Neighbors Classification',
                           X_LABEL: NEIGHBORS}
@@ -50,36 +51,50 @@ LOGISTIC_PARAMS: Dict = {C: [.01, .5, 1, 1.5, 2, 2.5, 3, 3.5, 4],
                          'solver': ['liblinear'],
                          'penalty': ['l2'],
                          'max_iter': [100]}
-#[.01, .5, 1, 1.5, 2, 2.5, 3, 3.5, 4]
-#[1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, 3]
 
-SVC_PARAMS: Dict = {C: [.01, 2, 4, 6, 8, 10],
-                    'kernel': ['linear', 'rbf', 'sigmoid'],
+SVC_PARAMS: Dict = {C: [.01, .5, 1, 1.5, 2, 2.5, 3, 3.5, 4],
+                    'kernel': ['linear'],
                     'gamma': ['scale']}
-
-#[.01, .5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10]
 
 SVC_GRAPH_LABELS: Dict = {TITLE: 'C-Support Vector Classification',
                           X_LABEL: C}
 
-# CLASSIFIERS: List = [(KNeighborsClassifier(), KNN_PARAMS, KNN_GRAPH_LABELS),
-#                      (LogisticRegression(),
-#                       LOGISTIC_PARAMS,
-#                       LOGISTIC_GRAPH_LABELS),
-#                      (SVC(), SVC_PARAMS, SVC_GRAPH_LABELS)]
-
-CLASSIFIERS: List = [(SVC(), SVC_PARAMS, SVC_GRAPH_LABELS)]
+CLASSIFIERS: List = [(KNeighborsClassifier(), KNN_PARAMS, KNN_GRAPH_LABELS),
+                     (LogisticRegression(),
+                      LOGISTIC_PARAMS,
+                      LOGISTIC_GRAPH_LABELS),
+                     (SVC(), SVC_PARAMS, SVC_GRAPH_LABELS)]
 
 
 def main() -> None:
-    data: np.array
+    """
+    Gets the confidence of the best classifier, and produces graphs of some
+    of the tests on all of the classifiers and data representations.
+    :return: Nothing
+    """
+    labeled_data: np.array
     target: np.array
-    data, target = read_data(TRAIN_FILE)
-    #bag_of_words(data, target)
-    glove(data, target)
-    # glove(data, target)
-    # scores: np.array = cross_val_score(clf, glove_rep_of_data, target, cv=5)
-    # print("Accuracy: %0.2f (+/- %0.2f)" % (scores.mean(), scores.std() * 2))
+    unlabeled_data: np.array
+    labeled_data, target = read_data(TRAIN_FILE)
+    unlabeled_data, _ = read_data(TEST_FILE)
+
+    # Why all the copies Gabe? Well, originally I was only testing so I decided
+    # to modify the data array in place within many parts of my code. Now that
+    # others need to use my code it makes more sense just to copy it, as
+    # otherwise the code would only work in a specific order. Which would
+    # not allow much testing.
+
+    # best_classifier_ci(np.copy(labeled_data), target)
+    # test_classifiers_and_data_reps(np.copy(labeled_data), target)
+
+    # Lets make some predictions.
+    logistic_pipeline: Pipeline = make_pipeline(
+        CountVectorizer(), TfidfTransformer(), LogisticRegression(
+            C=1.5, solver='liblinear'))
+    logistic_pipeline.fit(np.copy(labeled_data), target)
+    predictions: np.array = logistic_pipeline.predict(unlabeled_data)
+    integer_predictions: np.array = predictions.astype(int, copy=True)
+    np.savetxt('predicted-labels.txt', integer_predictions, fmt='%i')
 
 
 def read_data(file_name: str) -> Tuple[np.array, np.array]:
@@ -95,7 +110,41 @@ def read_data(file_name: str) -> Tuple[np.array, np.array]:
     return data, target
 
 
+def best_classifier_ci(data: np.array, target: np.array) -> None:
+    """
+    Produces the confidence interval for the best classifier.
+    :param data: The data to use to perform cross validation
+    :param target: The labels of the data to use for cross validation.
+    :return: Nothing.
+    """
+    count_vectorizer: CountVectorizer = CountVectorizer()
+    count_data: np.array = count_vectorizer.fit_transform(data)
+    tfidf_transformer: TfidfTransformer = TfidfTransformer()
+    tfidf_data: np.array = tfidf_transformer.fit_transform(count_data)
+    clf = LogisticRegression(C=1.5, solver='liblinear')
+    scores: np.array = cross_val_score(clf, tfidf_data, target, cv=10)
+    print("Accuracy: %0.2f (+/- %0.2f)" % (scores.mean(), scores.std() * 2))
+
+
+def test_classifiers_and_data_reps(data, target) -> None:
+    """
+    Tests different classifier configurations, and data representations.
+    :param data: The data to use to test these with.
+    :param target: The labels of the data.
+    :return: Nothing.
+    """
+    bag_of_words(data, target)
+    glove(data, target)
+
+
 def bag_of_words(data: np.array, target: np.array) -> None:
+    """
+    Tests the tfidf representation on all of the classifiers and
+    configurations.
+    :param data: The data to use for the testing.
+    :param target: The datas labels.
+    :return: Nothing.
+    """
     count_vectorizer: CountVectorizer = CountVectorizer(
         tokenizer=TextPreprocessor().process)
     count_data: np.array = count_vectorizer.fit_transform(data)
@@ -105,6 +154,13 @@ def bag_of_words(data: np.array, target: np.array) -> None:
 
 
 def glove(data: np.array, target: np.array):
+    """
+    Tests the glove representation on all of the classifiers and
+    configurations.
+    :param data: The data to use for testing.
+    :param target: The datas labels.
+    :return: Nothing.
+    """
     text_preprocessor: TextPreprocessor = TextPreprocessor()
     data = text_preprocessor.transform(data)
     glove_dict: Dict = glove_csv_to_dict(GLOVE_FILE)
@@ -156,15 +212,14 @@ def graph_param_metrics(data, target, name) -> None:
     :return: Nothing
     """
     for clf, params, labels in CLASSIFIERS:  # type: ClassifierMixin, Dict, Dict
-        print("test")
         test_means: List
         test_stds: List
         train_means: List
         params: Dict
         test_means, test_stds, train_means, params = grid_search(
             clf, params, data, target)
-        #graph_helper(test_means, train_means, params, labels, name)
-        print_helper(test_means, test_stds, params)
+        graph_helper(test_means, train_means, params, labels, name)
+        #print_helper(test_means, test_stds, params)
 
 
 def graph_helper(
@@ -245,52 +300,3 @@ def grid_search(clf: ClassifierMixin,
 
 if __name__ == '__main__':
     main()
-
-#x_train, x_test, y_train, y_test = train_test_split(data, target, test_size = 0.4, random_state = 0)
-# text_clf = Pipeline([
-    #     ('vect', CountVectorizer()),
-    #     ('tfidf', TfidfTransformer()),
-    #     ('clf', MultinomialNB())])
-
-# text_clf.fit(x_train, y_train)
-# predicted = text_clf.predict(x_test)
-# print(np.mean(predicted == y_test))
-
-# dt: pd.DataFrame = dt.T
-    # test: Dict = dt.to_dict(orient='list')
-
-    #print(dt.iloc[:, 1:].values)
-
-# dt = pd.read_csv(GLOVE_DATA, delim_whitespace=True, quoting=csv.QUOTE_NONE,
-#                      header=None, keep_default_na=False, index_col=0)
-
-# csv.field_size_limit(sys.maxsize)
-
-# knn_pipeline: Pipeline = make_pipeline(
-    #     CountVectorizer(), TfidfTransformer(), KNeighborsClassifier())
-    # logistic_pipeline: Pipeline = make_pipeline(
-    #     CountVectorizer(), TfidfTransformer(), LogisticRegression())
-    # svc_pipeline: Pipeline = make_pipeline(
-    #     CountVectorizer(), TfidfTransformer(), SVC(kernel='linear'))
-    # gb_pipeline: Pipeline = make_pipeline(
-    #      CountVectorizer(), TfidfTransformer(), GradientBoostingClassifier())
-
-
-# def find_params(clf: ClassifierMixin,
-#                 params_to_search: Dict,
-#                 data: np.array,
-#                 target: np.array) -> None:
-#     gs_clf: GridSearchCV = GridSearchCV(
-#         clf,
-#         params_to_search,
-#         cv=5,
-#         iid=False,
-#         n_jobs=-1,
-#         return_train_score=True,
-#         error_score='raise')
-#     gs_clf: GridSearchCV = gs_clf.fit(data, target)
-#     test_means = gs_clf.cv_results_['mean_test_score']
-#     train_means = gs_clf.cv_results_['mean_train_score']
-#     for test_mean, train_mean, params in zip(test_means, train_means, gs_clf.cv_results_['params']):
-#         print("Test: %0.3f, Train %0.3f for %r"
-#               % (test_mean, train_mean, params))
