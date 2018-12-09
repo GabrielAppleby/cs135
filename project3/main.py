@@ -21,6 +21,9 @@ from surprise.model_selection import cross_validate as sur_cross_val
 from typing import Dict, List, Iterator
 
 
+SVD_PARAMS: Dict = {'n_factors': 18, 'reg_all': .016}
+
+
 def main() -> None:
     """
     Gets the confidence of the best classifier, and produces graphs of some
@@ -45,6 +48,12 @@ def main() -> None:
     genders: np.array = genders_df.values.ravel()
     release_dates: np.array = release_dates_df.values.ravel()
 
+    # print(release_dates_df.min())
+    # print(release_dates_df.max())
+    # print(release_dates_df.mean())
+    # print(release_dates_df.median())
+    # print(release_dates_df.nunique())
+    # print(release_dates_df.values.shape)
     # grid_search_svd(train_dataset)
     # evaluate_mea(train_dataset)
     # evaluate_k_predictions(train_set, test_list)
@@ -64,11 +73,12 @@ def evaluate_gender_and_year(train_set: trainset,
     :param release_dates:
     :return:
     """
-    svd: SVD = SVD()
+    svd: SVD = SVD(**SVD_PARAMS)
     svd.fit(train_set)
     pipeline: Pipeline = make_pipeline(
         StandardScaler(), LogisticRegression(solver='liblinear',
-                                             multi_class='auto'))
+                                             multi_class='auto',
+                                             C=.004))
     scores: np.array = sk_cross_val(
         pipeline, svd.pu, y=genders, cv=5, return_train_score=True)
     print("Train error: " + str(1 - np.mean(scores['train_score'])))
@@ -91,9 +101,9 @@ def grid_search_svd(train_data: Dataset) -> None:
     """
     # Perform grid search
     param_grid: Dict = {
-        'n_factors': [5, 10, 20, 40, 80, 160, 320],
-        'reg_all': [.02, .04, .08, .16, .32, .64, 1.28, 2.56, 5.12]}
-    gs: SurGridSearch = SurGridSearch(SVD, param_grid, measures=['mae'], cv=3)
+        'n_factors': [16, 18, 20, 22, 24, 26, 28, 30, 32],
+        'reg_all': [.001, .002, .004, .008, .016, .032]}
+    gs: SurGridSearch = SurGridSearch(SVD, param_grid, measures=['mae'], cv=20)
     gs.fit(train_data)
 
     # Best option
@@ -109,6 +119,7 @@ def grid_search_svd(train_data: Dataset) -> None:
                              'std_test_mae',
                              'param_n_factors',
                              'param_reg_all']]
+    results_df = results_df.sort_values('mean_test_mae')
     print(results_df.to_string())
 
 
@@ -118,7 +129,11 @@ def evaluate_mea(train_data: Dataset) -> None:
     :param train_data: The data set to use.
     :return: Nothing.
     """
-    sur_cross_val(SVD(), train_data, measures=['MAE'], cv=5, verbose=True)
+    sur_cross_val(SVD(**SVD_PARAMS),
+                  train_data,
+                  measures=['MAE'],
+                  cv=5,
+                  verbose=True)
 
 
 def grid_search_logistic(train_set: trainset,
@@ -133,11 +148,12 @@ def grid_search_logistic(train_set: trainset,
     :param release_dates: The release dates of the movies.
     :return: Nothing.
     """
-    svd: SVD = SVD()
+    svd: SVD = SVD(**SVD_PARAMS)
     svd.fit(train_set)
     pipeline: Pipeline = make_pipeline(
         StandardScaler(), LogisticRegression())
-    params: Dict = {'logisticregression__C': [.004, .008, .016, .032, .064],
+    params: Dict = {'logisticregression__C':
+                        [.001, .002, .004, .008, .016, .032, .064, .128],
                     'logisticregression__solver': ['liblinear'],
                     'logisticregression__penalty': ['l2'],
                     'logisticregression__warm_start': ['true'],
@@ -146,7 +162,7 @@ def grid_search_logistic(train_set: trainset,
     gs_clf: SkGridSearch = SkGridSearch(
         pipeline,
         params,
-        cv=2,
+        cv=5,
         iid=False,
         n_jobs=-1,
         return_train_score=True,
@@ -185,7 +201,7 @@ def print_helper(scored_params: List) -> None:
     """
     for test_mean, std, params in scored_params:
         print("Test: %0.3f (+/-%0.03f) for %r"
-              % (test_mean, std, params))
+              % (1 - test_mean, std, params))
 
 
 def convert_to_dataset(df: DataFrame) -> DatasetAutoFolds:
@@ -206,7 +222,7 @@ def evaluate_k_predictions(train_set: trainset, test_list: List) -> None:
     :param test_list: The test list used to evaluate the SVD.
     :return: Nothing.
     """
-    svd: SVD = SVD()
+    svd: SVD = SVD(**SVD_PARAMS)
     svd.fit(train_set)
     test_x: List = train_set.build_anti_testset()
     predictions: List[Prediction] = svd.test(test_x)
